@@ -2,6 +2,8 @@
   (:import [com.fasterxml.jackson.core JsonToken JsonParser]
            [clojure.lang Var]))
 
+(declare parse)
+
 (defprotocol JascaParser
   (probe [self ^JsonToken token])
   (-parse [self ^JsonParser tokens]))
@@ -10,8 +12,8 @@
   JascaParser
   (probe [_ _] :nonconsuming)
   (-parse [self tokens]
-    (throw (ex-info msg error
-                    {:cause self, :location (.getCurrentLocation ^JsonParser tokens)}))))
+    (throw (ex-info msg {:failure error
+                         :parser self, :location (.getCurrentLocation ^JsonParser tokens)}))))
 
 (def fail ->FailParser)
 
@@ -82,9 +84,9 @@
           token (.currentToken tokens)]
       (if (pred token)
         token
-        (ex-info "unsatisfactory token"
-                 {:expected pred, :received token}
-                 {:cause self, :location (.getCurrentLocation tokens)})))))
+        (throw (ex-info "unsatisfactory token"
+                        {:expected pred, :received token
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
 
 (def sat ->SatParser)
 
@@ -110,9 +112,9 @@
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_NULL)
         nil
-        (ex-info "unsatisfactory token"
-                 {:expected JsonToken/VALUE_NULL, :received (.currentToken tokens)}
-                 {:cause self, :location (.getCurrentLocation tokens)})))))
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/VALUE_NULL, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
 
 (def nullp (NullParser.))
 
@@ -123,9 +125,9 @@
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_NUMBER_INT)
         (.getNumberValue tokens)
-        (ex-info "unsatisfactory token"
-                 {:expected JsonToken/VALUE_NUMBER_INT, :received (.currentToken tokens)}
-                 {:cause self, :location (.getCurrentLocation tokens)})))))
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/VALUE_NUMBER_INT, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
 
 (def intp (IntParser.))
 
@@ -136,11 +138,11 @@
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_NUMBER_FLOAT)
         (.getNumberValue tokens)
-        (ex-info "unsatisfactory token"
-                 {:expected JsonToken/VALUE_NUMBER_FLOAT, :received (.currentToken tokens)}
-                 {:cause self, :location (.getCurrentLocation tokens)})))))
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/VALUE_NUMBER_FLOAT, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
 
-(def intp (FloatParser.))
+(def floatp (FloatParser.))
 
 (deftype StringParser []
   JascaParser
@@ -149,9 +151,9 @@
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_STRING)
         (.getText tokens)
-        (ex-info "unsatisfactory token"
-                 {:expected JsonToken/VALUE_STRING, :received (.currentToken tokens)}
-                 {:cause self, :location (.getCurrentLocation tokens)})))))
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/VALUE_STRING, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
 
 (def stringp (StringParser.))
 
