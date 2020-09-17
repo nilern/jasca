@@ -209,10 +209,10 @@
 
   (-parse [_ tokens]
     (let [^JsonParser tokens tokens]
-      (loop [vs []]
+      (loop [vs (transient [])]
         (case (-probe inner (.currentToken ^JsonParser tokens))
-          :fail vs
-          (recur (conj vs (-parse inner tokens))))))))
+          :fail (persistent! vs)
+          (recur (conj! vs (-parse inner tokens))))))))
 
 (def many ->ManyParser)
 
