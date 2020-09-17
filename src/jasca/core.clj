@@ -73,7 +73,7 @@
 
 (defmacro orp [& alts]
   (if (empty? alts)
-    `(fail "orp: out of options")
+    `(fail "jasca.core/orp: out of alternatives" :orp-alternatives)
     `(alt ~(first alts) (orp ~@(rest alts)))))
 
 (deftype SatParser [pred]
@@ -100,10 +100,33 @@
 (defn end-object? [token] (identical? token JsonToken/END_OBJECT))
 (def end-object (sat end-object?))
 
-(defn true-token? [token] (identical? token JsonToken/VALUE_TRUE))
-(def truep (sat true-token?))
-(defn false-token? [token] (identical? token JsonToken/VALUE_FALSE))
-(def falsep (sat false-token?))
+(deftype FalseParser []
+  JascaParser
+  (probe [_ token] (if (identical? token JsonToken/VALUE_FALSE) :consuming :fail))
+  (-parse [self tokens]
+    (let [^JsonParser tokens tokens]
+      (if (identical? (.currentToken tokens) JsonToken/VALUE_FALSE)
+        false
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/VALUE_FALSE, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
+
+(def falsep (FalseParser.))
+
+(deftype TrueParser []
+  JascaParser
+  (probe [_ token] (if (identical? token JsonToken/VALUE_TRUE) :consuming :fail))
+  (-parse [self tokens]
+    (let [^JsonParser tokens tokens]
+      (if (identical? (.currentToken tokens) JsonToken/VALUE_TRUE)
+        true
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/VALUE_TRUE, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
+
+(def truep (TrueParser.))
+
+(def booleanp (orp truep falsep))
 
 (deftype NullParser []
   JascaParser
