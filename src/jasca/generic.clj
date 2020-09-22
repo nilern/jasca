@@ -1,5 +1,7 @@
 (ns jasca.generic
-  (:require [jasca.core :as core :refer [plet orp]]))
+  (:refer-clojure :exclude [read-string])
+  (:require [jasca.core :as core :refer [plet orp]])
+  (:import [com.fasterxml.jackson.core JsonFactory]))
 
 (declare objectp arrayp)
 
@@ -12,7 +14,7 @@
        core/falsep
        core/nullp))
 
-(def arrayp (array-of value))
+(def arrayp (core/array-of value))
 
 (def member
   (plet [k core/field-name
@@ -24,3 +26,8 @@
          kvs (core/many member)                             ; OPTIMIZE
          _ core/end-object]
     (into {} kvs)))
+
+(def ^JsonFactory +factory+ (JsonFactory.))
+
+(defn read-value [^String s]
+  (core/parse value (.createParser +factory+ s)))
