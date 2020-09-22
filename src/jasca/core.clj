@@ -103,6 +103,8 @@
 (defn end-object? [token] (identical? token JsonToken/END_OBJECT))
 (def end-object (sat end-object?))
 
+;;; TODO: DRY:
+
 (deftype FalseParser []
   JascaParser
   (-probe [_ token] (if (identical? token JsonToken/VALUE_FALSE) :consuming :fail))
@@ -191,6 +193,21 @@
                          :parser self, :location (.getCurrentLocation tokens)}))))))
 
 (def stringp (StringParser.))
+
+(deftype FieldNameParser []
+  JascaParser
+  (-probe [_ token] (if (identical? token JsonToken/FIELD_NAME) :consuming :fail))
+  (-parse [self tokens]
+    (let [^JsonParser tokens tokens]
+      (if (identical? (.currentToken tokens) JsonToken/FIELD_NAME)
+        (let [n (.getText tokens)]
+          (.nextToken tokens)
+          n)
+        (throw (ex-info "unsatisfactory token"
+                        {:expected JsonToken/FIELD_NAME, :received (.currentToken tokens)
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
+
+(def field-name (FieldNameParser.))
 
 (extend-protocol JascaParser
   Var
