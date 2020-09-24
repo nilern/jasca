@@ -1,4 +1,4 @@
-(ns jasca.perf-test
+(ns jasca.jmh
   "Shamelessly pilfered from `jsonista.jmh.`"
   (:require [jasca.generic :as generic]
             [jsonista.core :as j]

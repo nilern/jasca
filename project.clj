@@ -16,4 +16,9 @@
                                   [com.cognitect/transit-clj "1.0.324"]
                                   [criterium "0.4.6"]]
                    :global-vars {*warn-on-reflection* true}}
-             :jmh {:jvm-opts ["-Dclojure.compiler.direct-linking=true"]}})
+             :jmh {:jvm-opts ["-Dclojure.compiler.direct-linking=true"]}
+             :perf {:jvm-opts ^:replace ["-server"
+                                         "-Xmx4096m"
+                                         "-Dclojure.compiler.direct-linking=true"]}}
+  :aliases {"perf" ["with-profile" "default,dev,perf"]})
+
