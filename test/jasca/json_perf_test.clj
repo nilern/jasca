@@ -115,14 +115,10 @@
     (assert (= json (j/write-value-as-string data)))
     (cc/quick-bench (j/write-value-as-string data))))
 
-(defn decode-perf-different-sizes []
-  (doseq [file ["dev-resources/json10b.json"
-                "dev-resources/json100b.json"
-                "dev-resources/json1k.json"
-                "dev-resources/json10k.json"
-                "dev-resources/json100k.json"]
-          :let [data (cheshire/parse-string (slurp file))
-                json (cheshire/generate-string data)]]
+(defn decode-perf-size [size]
+  (let [file (str "dev-resources/json" size ".json")
+        data (cheshire/parse-string (slurp file))
+        json (cheshire/generate-string data)]
 
     (title file)
 
@@ -147,6 +143,10 @@
     (title "decode: jasca")
     (assert (= data (jg/read-value json)))
     (cc/quick-bench (jg/read-value json))))
+
+(defn decode-perf-different-sizes []
+  (doseq [size ["10b" "100b" "1k" "10k" "100k"]]
+    (decode-perf-size size)))
 
 (comment
   (encode-perf)

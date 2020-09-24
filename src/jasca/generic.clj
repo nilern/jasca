@@ -16,16 +16,13 @@
 
 (def arrayp (core/array-of value))
 
-(def member
-  (plet [k core/field-name
-         v value]
-    [k v]))
-
 (def objectp
   (plet [_ core/start-object
-         kvs (core/many member)                             ; OPTIMIZE
+         obj (->> (core/many-reducing-kv (fn [obj k v] (assoc! obj k v)) #(transient {})
+                                         core/field-name value)
+                  (core/fmap persistent!))
          _ core/end-object]
-    (into {} kvs)))
+    obj))
 
 (def ^JsonFactory +factory+ (JsonFactory.))
 

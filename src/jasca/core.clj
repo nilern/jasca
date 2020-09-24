@@ -32,10 +32,10 @@
 (deftype ApplicativeParser [fp inner]
   JascaParser
   (-probe [_ token]
-    (let [-probed (-probe fp token)]
-      (case -probed
-        :nonconsuming (-probe inner token)
-        -probed)))
+    (let [probed (-probe fp token)]
+      (if (identical? probed :nonconsuming)
+        (-probe inner token)
+        probed)))
   (-parse [_ tokens]
     (let [f (-parse fp tokens)]
       (f (-parse inner tokens)))))
@@ -60,15 +60,15 @@
 (deftype AlternativeParser [p p*]
   JascaParser
   (-probe [_ token]
-    (let [-probed (-probe p token)]
-      (case -probed
-        :fail (-probe p* token)
-        -probed)))
+    (let [probed (-probe p token)]
+      (if (identical? probed :fail)
+        (-probe p* token)
+        probed)))
 
   (-parse [_ tokens]
     (let [^JsonParser tokens tokens]
-      (case (-probe p (.currentToken tokens))
-        :fail (-parse p* tokens)
+      (if (identical? (-probe p (.currentToken tokens)) :fail)
+        (-parse p* tokens)
         (-parse p tokens)))))
 
 (def alt ->AlternativeParser)
@@ -216,28 +216,61 @@
 
 (defn opt [parser] (alt parser (pure nil)))
 
-(deftype ManyParser [inner]
+(deftype ManyReducingParser [f make-acc inner]
   JascaParser
   (-probe [_ token]
-    (let [-probed (-probe inner token)]
-      (case -probed
-        :fail :nonconsuming
-        -probed)))
+    (let [probed (-probe inner token)]
+      (if (identical? probed :fail)
+        :nonconsuming
+        probed)))
 
   (-parse [_ tokens]
     (let [^JsonParser tokens tokens]
-      (loop [vs (transient [])]
-        (case (-probe inner (.currentToken ^JsonParser tokens))
-          :fail (persistent! vs)
-          (recur (conj! vs (-parse inner tokens))))))))
+      (loop [acc (make-acc)]
+        (if (identical? (-probe inner (.currentToken ^JsonParser tokens)) :fail)
+          acc
+          (recur (f acc (-parse inner tokens))))))))
 
-(def many ->ManyParser)
+(def many-reducing ->ManyReducingParser)
+
+(defn many [p]
+  (->> (many-reducing conj! #(transient []) p)
+       (fmap persistent!)))
 
 (defn array-of [item]
   (plet [_ start-array
          items (many item)
          _ end-array]
     items))
+
+(deftype ManyReducingKVParser [f make-acc kp vp]
+  JascaParser
+  (-probe [_ token]
+    (let [probed (-probe kp token)]
+      (condp identical? probed
+        :fail :nonconsuming
+        :nonconsuming (let [probed (-probe vp token)]
+                        (if (identical? probed :fail)
+                          :nonconsuming
+                          probed))
+        probed)))
+
+  (-parse [_ tokens]
+    (let [^JsonParser tokens tokens]
+      (loop [acc (make-acc)]
+        (let [lookahead-token (.currentToken ^JsonParser tokens)]
+          (condp identical? (-probe kp lookahead-token)
+            :fail acc
+            :nonconsuming (if (identical? (-probe vp lookahead-token) :fail)
+                            acc
+                            (let [k (-parse kp tokens)
+                                  v (-parse vp tokens)]
+                              (recur (f acc k v))))
+            (let [k (-parse kp tokens)
+                  v (-parse vp tokens)]
+              (recur (f acc k v)))))))))
+
+(def many-reducing-kv ->ManyReducingKVParser)
 
 (defn parse [parser ^JsonParser tokens]
   (.nextToken tokens)
