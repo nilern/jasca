@@ -3,12 +3,12 @@
            [clojure.lang Var]))
 
 (defprotocol JascaParser
-  (-probe [self ^JsonToken token])
+  (-probe [self ^JsonParser tokens ^JsonToken token])
   (-parse [self ^JsonParser tokens]))
 
 (deftype FailParser [msg error]
   JascaParser
-  (-probe [_ _] :nonconsuming)
+  (-probe [_ _ _] :nonconsuming)
   (-parse [self tokens]
     (throw (ex-info msg {:failure error
                          :parser self, :location (.getCurrentLocation ^JsonParser tokens)}))))
@@ -17,24 +17,24 @@
 
 (deftype PureParser [v]
   JascaParser
-  (-probe [_ _] :nonconsuming)
+  (-probe [_ _ _] :nonconsuming)
   (-parse [_ _] v))
 
 (def pure ->PureParser)
 
 (deftype FunctorParser [f inner]
   JascaParser
-  (-probe [_ token] (-probe inner token))
+  (-probe [_ tokens token] (-probe inner tokens token))
   (-parse [_ tokens] (f (-parse inner tokens))))
 
 (def fmap ->FunctorParser)
 
 (deftype ApplicativeParser [fp inner]
   JascaParser
-  (-probe [_ token]
-    (let [probed (-probe fp token)]
+  (-probe [_ tokens token]
+    (let [probed (-probe fp tokens token)]
       (if (identical? probed :nonconsuming)
-        (-probe inner token)
+        (-probe inner tokens token)
         probed)))
   (-parse [_ tokens]
     (let [f (-parse fp tokens)]
@@ -59,15 +59,15 @@
 
 (deftype AlternativeParser [p p*]
   JascaParser
-  (-probe [_ token]
-    (let [probed (-probe p token)]
+  (-probe [_ tokens token]
+    (let [probed (-probe p tokens token)]
       (if (identical? probed :fail)
-        (-probe p* token)
+        (-probe p* tokens token)
         probed)))
 
   (-parse [_ tokens]
     (let [^JsonParser tokens tokens]
-      (if (identical? (-probe p (.currentToken tokens)) :fail)
+      (if (identical? (-probe p tokens (.currentToken tokens)) :fail)
         (-parse p* tokens)
         (-parse p tokens)))))
 
@@ -80,7 +80,7 @@
 
 (deftype SatParser [pred]
   JascaParser
-  (-probe [_ token] (if (pred token) :consuming :fail))
+  (-probe [_ _ token] (if (pred token) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens
           token (.currentToken tokens)]
@@ -107,7 +107,7 @@
 
 (deftype FalseParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/VALUE_FALSE) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_FALSE) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_FALSE)
@@ -121,7 +121,7 @@
 
 (deftype TrueParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/VALUE_TRUE) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_TRUE) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_TRUE)
@@ -137,7 +137,7 @@
 
 (deftype NullParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/VALUE_NULL) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_NULL) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_NULL)
@@ -151,7 +151,7 @@
 
 (deftype IntParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/VALUE_NUMBER_INT) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_NUMBER_INT) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_NUMBER_INT)
@@ -166,7 +166,7 @@
 
 (deftype FloatParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/VALUE_NUMBER_FLOAT) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_NUMBER_FLOAT) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_NUMBER_FLOAT)
@@ -181,7 +181,7 @@
 
 (deftype StringParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/VALUE_STRING) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_STRING) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/VALUE_STRING)
@@ -196,7 +196,7 @@
 
 (deftype FieldNameParser []
   JascaParser
-  (-probe [_ token] (if (identical? token JsonToken/FIELD_NAME) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token JsonToken/FIELD_NAME) :consuming :fail))
   (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (if (identical? (.currentToken tokens) JsonToken/FIELD_NAME)
@@ -209,17 +209,38 @@
 
 (def field-name (FieldNameParser.))
 
+(deftype FieldNameEqParser [goal-name]
+  JascaParser
+  (-probe [_ tokens token]
+    (if (and (identical? token JsonToken/FIELD_NAME)
+             (= (.getText ^JsonParser tokens) goal-name))
+      :consuming
+      :fail))
+  (-parse [self tokens]
+    (let [^JsonParser tokens tokens
+          n (.getText tokens)]
+      (if (and (identical? (.currentToken tokens) JsonToken/FIELD_NAME)
+               (= n goal-name))
+        (do (.nextToken tokens)
+            n)
+        (throw (ex-info "unsatisfactory token"
+                        {:expected [JsonToken/FIELD_NAME goal-name]
+                         :received [(.currentToken tokens) (.getText tokens)]
+                         :parser self, :location (.getCurrentLocation tokens)}))))))
+
+(def field-name= ->FieldNameEqParser)
+
 (extend-protocol JascaParser
   Var
-  (-probe [self token] (-probe @self token))
+  (-probe [self tokens token] (-probe @self tokens token))
   (-parse [self tokens] (-parse @self tokens)))
 
 (defn opt [parser] (alt parser (pure nil)))
 
 (deftype ManyReducingParser [f make-acc inner]
   JascaParser
-  (-probe [_ token]
-    (let [probed (-probe inner token)]
+  (-probe [_ tokens token]
+    (let [probed (-probe inner tokens token)]
       (if (identical? probed :fail)
         :nonconsuming
         probed)))
@@ -227,7 +248,7 @@
   (-parse [_ tokens]
     (let [^JsonParser tokens tokens]
       (loop [acc (make-acc)]
-        (if (identical? (-probe inner (.currentToken ^JsonParser tokens)) :fail)
+        (if (identical? (-probe inner tokens (.currentToken ^JsonParser tokens)) :fail)
           acc
           (recur (f acc (-parse inner tokens))))))))
 
@@ -245,11 +266,11 @@
 
 (deftype ManyReducingKVParser [f make-acc kp vp]
   JascaParser
-  (-probe [_ token]
-    (let [probed (-probe kp token)]
+  (-probe [_ tokens token]
+    (let [probed (-probe kp tokens token)]
       (condp identical? probed
         :fail :nonconsuming
-        :nonconsuming (let [probed (-probe vp token)]
+        :nonconsuming (let [probed (-probe vp tokens token)]
                         (if (identical? probed :fail)
                           :nonconsuming
                           probed))
@@ -259,9 +280,9 @@
     (let [^JsonParser tokens tokens]
       (loop [acc (make-acc)]
         (let [lookahead-token (.currentToken ^JsonParser tokens)]
-          (condp identical? (-probe kp lookahead-token)
+          (condp identical? (-probe kp tokens lookahead-token)
             :fail acc
-            :nonconsuming (if (identical? (-probe vp lookahead-token) :fail)
+            :nonconsuming (if (identical? (-probe vp tokens lookahead-token) :fail)
                             acc
                             (let [k (-parse kp tokens)
                                   v (-parse vp tokens)]
@@ -271,6 +292,14 @@
               (recur (f acc k v)))))))))
 
 (def many-reducing-kv ->ManyReducingKVParser)
+
+(defn object-of [kp vp]
+  (plet [_ start-object
+         obj (->> (many-reducing-kv (fn [obj k v] (assoc! obj k v)) #(transient {})
+                                    kp vp)
+                  (fmap persistent!))
+         _ end-object]
+    obj))
 
 (defn parse [parser ^JsonParser tokens]
   (.nextToken tokens)
