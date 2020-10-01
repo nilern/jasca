@@ -22,40 +22,74 @@
 
 (def pure ->PureParser)
 
-(deftype FunctorParser [f inner]
+;;; TODO: DRY:
+
+(deftype Functor0Parser [f]
+  JascaParser
+  (-probe [_ _ _] :nonconsuming)
+  (-parse [_ _] (f)))
+
+(deftype Functor1Parser [f inner]
   JascaParser
   (-probe [_ tokens token] (-probe inner tokens token))
   (-parse [_ tokens] (f (-parse inner tokens))))
 
-(def fmap ->FunctorParser)
-
-(deftype ApplicativeParser [fp inner]
+(deftype Functor2Parser [f inner inner*]
   JascaParser
   (-probe [_ tokens token]
-    (let [probed (-probe fp tokens token)]
+    (let [probed (-probe inner tokens token)]
       (if (identical? probed :nonconsuming)
-        (-probe inner tokens token)
+        (-probe inner* tokens token)
         probed)))
   (-parse [_ tokens]
-    (let [f (-parse fp tokens)]
-      (f (-parse inner tokens)))))
+    (let [arg (-parse inner tokens)
+          arg* (-parse inner* tokens)]
+      (f arg arg*))))
 
-(def fapply ->ApplicativeParser)
+(deftype Functor3Parser [f inner inner* inner**]
+  JascaParser
+  (-probe [_ tokens token]
+    (let [probed (-probe inner tokens token)]
+      (if (identical? probed :nonconsuming)
+        (let [probed (-probe inner* tokens token)]
+          (if (identical? probed :nonconsuming)
+            (-probe inner** tokens token)
+            probed))
+        probed)))
+  (-parse [_ tokens]
+    (let [arg (-parse inner tokens)
+          arg* (-parse inner* tokens)
+          arg** (-parse inner** tokens)]
+      (f arg arg* arg**))))
+
+(deftype FunctorParser [f ^"[Ljava.lang.Object;" inners]
+  JascaParser
+  (-probe [_ tokens token]
+    (loop [i 0]
+      (let [probed (-probe (aget inners i) tokens token)]
+        (if (identical? probed :nonconsuming)
+          (if inners
+            (recur (inc i))
+            :nonconsuming)
+          probed))))
+  (-parse [_ tokens]
+    (let [args (object-array (alength inners))]
+      (dotimes [i (alength inners)]
+        (aset args i (-parse (aget inners i) tokens)))
+      (apply f args))))
+
+(defn fmap
+  ([f] (Functor0Parser. f))
+  ([f p] (Functor1Parser. f p))
+  ([f p p*] (Functor2Parser. f p p*))
+  ([f p p* p**] (Functor3Parser. f p p* p**))
+  ([f p p* p** & ps] (FunctorParser. f (object-array (list* p p* p** ps)))))
 
 (defmacro plet [bindings & body]
-  (letfn [(body-fn [binders]
-            (if (empty? binders)
-              `(do ~@body)
-              `(fn [~(first binders)]
-                 ~(body-fn (rest binders)))))]
-    (let [binders (take-nth 2 bindings)
-          actions (take-nth 2 (rest bindings))]
-      (assert (= (count binders) (count actions)))
-      (if (empty? binders)
-        `(do ~@body)
-        (reduce (fn [acc action] `(fapply ~acc ~action))
-                `(fmap ~(body-fn binders) ~(first actions))
-                (rest actions))))))
+  (let [binders (take-nth 2 bindings)
+        actions (take-nth 2 (rest bindings))]
+    (assert (= (count binders) (count actions)))
+    `(fmap (fn [~@binders] ~@body) ~@actions)))
 
 (deftype AlternativeParser [p p*]
   JascaParser
