@@ -127,61 +127,35 @@
 
 (def sat ->SatParser)
 
-(defn start-array? [token] (identical? token JsonToken/START_ARRAY))
-(def start-array (sat start-array?))
-(defn end-array? [token] (identical? token JsonToken/END_ARRAY))
-(def end-array (sat end-array?))
-
-(defn start-object? [token] (identical? token JsonToken/START_OBJECT))
-(def start-object (sat start-object?))
-(defn end-object? [token] (identical? token JsonToken/END_OBJECT))
-(def end-object (sat end-object?))
-
-;;; TODO: DRY:
-
-(deftype FalseParser []
+(deftype TokenParser [expected-token]
   JascaParser
-  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_FALSE) :consuming :fail))
+  (-probe [_ _ token] (if (identical? token expected-token) :consuming :fail))
   (-parse [self tokens]
-    (let [^JsonParser tokens tokens]
-      (if (identical? (.currentToken tokens) JsonToken/VALUE_FALSE)
+    (let [^JsonParser tokens tokens
+          token (.currentToken tokens)]
+      (if (identical? token expected-token)
         (do (.nextToken tokens)
-            false)
+            token)
         (throw (ex-info "unsatisfactory token"
-                        {:expected JsonToken/VALUE_FALSE, :received (.currentToken tokens)
+                        {:expected expected-token, :received token
                          :parser self, :location (.getCurrentLocation tokens)}))))))
 
-(def falsep (FalseParser.))
+(def tokenp ->TokenParser)
 
-(deftype TrueParser []
-  JascaParser
-  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_TRUE) :consuming :fail))
-  (-parse [self tokens]
-    (let [^JsonParser tokens tokens]
-      (if (identical? (.currentToken tokens) JsonToken/VALUE_TRUE)
-        (do (.nextToken tokens)
-            true)
-        (throw (ex-info "unsatisfactory token"
-                        {:expected JsonToken/VALUE_TRUE, :received (.currentToken tokens)
-                         :parser self, :location (.getCurrentLocation tokens)}))))))
+(def start-array (tokenp JsonToken/START_ARRAY))
+(def end-array (tokenp JsonToken/END_ARRAY))
 
-(def truep (TrueParser.))
+(def start-object (tokenp JsonToken/START_OBJECT))
+(def end-object (tokenp JsonToken/END_OBJECT))
+
+(def falsep (fmap (fn [_] false) (tokenp JsonToken/VALUE_FALSE)))
+(def truep (fmap (fn [_] true) (tokenp JsonToken/VALUE_TRUE)))
 
 (def booleanp (orp truep falsep))
 
-(deftype NullParser []
-  JascaParser
-  (-probe [_ _ token] (if (identical? token JsonToken/VALUE_NULL) :consuming :fail))
-  (-parse [self tokens]
-    (let [^JsonParser tokens tokens]
-      (if (identical? (.currentToken tokens) JsonToken/VALUE_NULL)
-        (do (.nextToken tokens)
-            nil)
-        (throw (ex-info "unsatisfactory token"
-                        {:expected JsonToken/VALUE_NULL, :received (.currentToken tokens)
-                         :parser self, :location (.getCurrentLocation tokens)}))))))
+(def nullp (fmap (fn [_] nil) (tokenp JsonToken/VALUE_NULL)))
 
-(def nullp (NullParser.))
+;;; TODO: DRY:
 
 (deftype IntParser []
   JascaParser
