@@ -4,7 +4,8 @@
             [jsonista.core :as j]
             [jasca.core :as core :refer [plet orp]]
             [jasca.generic :as generic]
-            [criterium.core :as cc]))
+            [criterium.core :as cc])
+  (:import [com.fasterxml.jackson.core JsonToken]))
 
 (defn- ids-cheshire [s]
   (->> (cheshire/parse-string s true)
@@ -27,7 +28,7 @@
                  (orp (plet [_ kp
                              v vp]
                         v)
-                      (plet [_ core/field-name
+                      (plet [_ (core/tokenp JsonToken/FIELD_NAME)
                              _ generic/skip-value]
                         sentinel)))
         obj-field (fn [kp vp]

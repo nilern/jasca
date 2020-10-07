@@ -238,6 +238,22 @@
 
 (def field-name= ->FieldNameEqParser)
 
+(defprotocol Fix
+  (-fix [self f]))
+
+(deftype FixParser [^:volatile-mutable inner]
+  Fix
+  (-fix [self f]
+    (let [v (f self)]
+      (set! inner v)
+      v))
+
+  JascaParser
+  (-probe [_ tokens token] (-probe inner tokens token))
+  (-parse [_ tokens] (-parse inner tokens)))
+
+(defn fix [f] (-fix (FixParser. nil) f))
+
 (extend-protocol JascaParser
   Var
   (-probe [self tokens token] (-probe @self tokens token))
