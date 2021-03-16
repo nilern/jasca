@@ -301,14 +301,6 @@
 
 (def many-reducing-kv ->ManyReducingKVParser)
 
-(defn object-of [kp vp]
-  (plet [_ start-object
-         obj (->> (many-reducing-kv (fn [obj k v] (assoc! obj k v)) #(transient {})
-                                    kp vp)
-                  (fmap persistent!))
-         _ end-object]
-    obj))
-
 (deftype JSObjParser [kf vf]
   JascaParser
   (-probe [_ tokens]
@@ -317,7 +309,7 @@
         :nonconsuming
         probed)))
 
-  (-parse [_ tokens]
+  (-parse [self tokens]
     (let [^JsonParser tokens tokens]
       (loop [acc (transient {})]
         (if (identical? (-probe field-name tokens) :fail)
@@ -325,13 +317,24 @@
           (let [k (kf (-parse field-name tokens))]
             (if-some [vp (vf k)]
               (recur (assoc! acc k (-parse vp tokens)))
-              (persistent! acc))))))))
+              (throw (ex-info "disallowed key"
+                        {:key k, :parser self, :location (.getCurrentLocation tokens)})))))))))
 
-(defn object-of* [kf vf]
-  (plet [_ start-object
-         obj (->JSObjParser kf vf)
-         _ end-object]
-    obj))
+(defn object
+  ([k->vp] (object identity k->vp))
+  ([kf k->vp]
+   (plet [_ start-object
+          obj (->JSObjParser kf k->vp)
+          _ end-object]
+     obj)))
+
+(defn object-of
+  ([vp] (object-of identity vp))
+  ([kf vp]
+   (plet [_ start-object
+          obj (->JSObjParser kf (fn [_] vp))
+          _ end-object]
+     obj)))
 
 (defn parse [parser ^JsonParser tokens]
   (.nextToken tokens)

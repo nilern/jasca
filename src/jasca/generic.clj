@@ -5,7 +5,7 @@
 
 (def value
   (core/fix (fn [value]
-              (orp (core/object-of core/field-name value)
+              (orp (core/object-of identity value)
                    (core/array-of value)
                    core/stringp
                    core/intp
@@ -16,7 +16,7 @@
 
 (def skip-value
   (core/fix (fn [skip-value]
-              (orp (core/object-of (core/tokenp JsonToken/FIELD_NAME) skip-value)
+              (orp (core/object-of identity skip-value)
                    (core/array-of skip-value)
                    (core/tokenp JsonToken/VALUE_STRING)
                    (core/tokenp JsonToken/VALUE_NUMBER_INT)
