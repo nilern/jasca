@@ -309,6 +309,31 @@
          _ end-object]
     obj))
 
+(deftype JSObjParser [kf vf]
+  JascaParser
+  (-probe [_ tokens]
+    (let [probed (-probe field-name tokens)]
+      (if (identical? probed :fail)
+        :nonconsuming
+        probed)))
+
+  (-parse [_ tokens]
+    (let [^JsonParser tokens tokens]
+      (loop [acc (transient {})]
+        (if (identical? (-probe field-name tokens) :fail)
+          (persistent! acc)
+          (let [k (kf (-parse field-name tokens))]
+            (if-some [vp (vf k)]
+              (recur (assoc! acc k (-parse vp tokens)))
+              (persistent! acc))))))))
+
+(defn object-of* [kf vf]
+  (plet [_ start-object
+         obj (->JSObjParser kf vf)
+         _ end-object]
+    obj))
+
 (defn parse [parser ^JsonParser tokens]
   (.nextToken tokens)
   (-parse parser tokens))
+
