@@ -14,7 +14,7 @@
 
 (def ^:private epsilon (Epsilon.))
 
-(defn grammar-firsts [grammar]
+(defn- grammar-firsts [grammar]
   (loop [nt-firsts (zipmap (keys grammar) (repeat #{}))]
     (let [nt-firsts* (into {} (map (fn [[name production]] [name (firsts* nt-firsts production)]))
                            grammar)]
@@ -22,30 +22,69 @@
         nt-firsts
         (recur nt-firsts*)))))
 
+;;;; # FOLLOW Set
+
+(defprotocol Follows
+  (-follows* [production follows nt-firsts nt-follows]))
+
+(defn- follows* [nt-firsts nt-follows production follows] (-follows* production follows nt-firsts nt-follows))
+
+(defn- grammar-follows [nt-firsts grammar start-nts]
+  (loop [nt-follows (merge (zipmap (keys grammar) (repeat #{}))
+                           (zipmap start-nts (repeat #{nil})))]
+    (let [nt-follows* (reduce (fn [nt-follows [name production]]
+                                (follows* nt-firsts nt-follows production (get nt-follows name)))
+                              nt-follows grammar)]
+      (if (= nt-follows* nt-follows)
+        nt-follows*
+        (recur nt-follows*)))))
+
+;;;; # Lookahead Set
+
+(defn- lookaheads [firsts follows]
+  (if (contains? firsts epsilon)
+    (set/union (disj firsts epsilon) follows)
+    firsts))
+
 ;;;; # Grammar AST
 
-(extend-protocol Firsts
-  JsonToken
-  (-firsts* [token _] #{token}))
-
-(defrecord NonTerminal [name]
+(extend-type JsonToken
   Firsts
-  (-firsts* [_ nt-firsts] (get nt-firsts name)))
+  (-firsts* [token _] #{token})
 
-(defrecord Functor [f args]
+  Follows
+  (-follows* [_ _ _ nt-follows] nt-follows))
+
+(deftype NonTerminal [name]
   Firsts
-  (-firsts* [_ nt-firsts]
-    (reduce (fn [firsts arg]
-              (if (contains? firsts epsilon)
-                (set/union (disj firsts epsilon) (firsts* nt-firsts arg))
-                (reduced firsts)))
-            #{epsilon} args)))
+  (-firsts* [_ nt-firsts] (get nt-firsts name))
 
-(defrecord Alt [alts]
+  Follows
+  (-follows* [_ follows _ nt-follows] (update nt-follows name set/union follows)))
+
+(deftype Functor [f args]
   Firsts
   (-firsts* [_ nt-firsts]
-    (transduce (map #(firsts* % nt-firsts)) set/union
-               #{} alts)))
+    (reduce (fn [firsts arg] (lookaheads firsts (firsts* nt-firsts arg)))
+            #{epsilon} args))
+
+  Follows
+  (-follows* [_ follows nt-firsts nt-follows]
+    (first (reduce (fn [[nt-follows follows] arg]
+                     [(follows* nt-firsts nt-follows arg follows)
+                      (lookaheads (firsts* nt-firsts arg) follows)])
+                   [nt-follows follows] (rseq args)))))
+
+(deftype Alt [alts]
+  Firsts
+  (-firsts* [_ nt-firsts]
+    (transduce (map #(firsts* nt-firsts %)) set/union
+               #{} alts))
+
+  Follows
+  (-follows* [_ follows nt-firsts nt-follows]
+    (reduce (fn [nt-follows alt] (follows* nt-firsts nt-follows alt follows))
+            nt-follows alts)))
 
 ;;;; # Analyze into Grammar AST
 
@@ -101,3 +140,13 @@
     (into {} (map (fn [[k v]] [k (analyze grammar v)]))
           grammar)
     (throw (RuntimeException. "Grammar is not a map"))))
+
+;;;;
+
+(comment
+  (def generic
+    {:value   [:or :object :array :boolean :null]
+     :object  [:-> \{ \} (fn [_ _] {})]
+     :array   [:-> \[ \] (fn [_ _] [])]
+     :boolean [:or true false]
+     :null    nil}))
