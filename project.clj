@@ -5,8 +5,7 @@
             :url "https://www.eclipse.org/legal/epl-2.0/"}
   :plugins [[lein-jmh "0.3.0"]]
   :dependencies [[org.clojure/clojure "1.10.1"]
-                 [com.fasterxml.jackson.core/jackson-core "2.11.2"]
-                 [com.deepbeginnings/monnit "0.1.2"]]
+                 [com.fasterxml.jackson.core/jackson-core "2.11.2"]]
   :repl-options {:init-ns jasca.core}
   :profiles {:dev {:dependencies [[org.clojure/clojure "1.10.1"]
                                   [jmh-clojure/jmh-clojure "0.4.0"]
