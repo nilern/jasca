@@ -1,7 +1,8 @@
 (ns jasca.impl.grammar
   (:require [clojure.set :as set])
-  (:import (clojure.lang IPersistentVector Keyword)
-           (com.fasterxml.jackson.core JsonToken)))
+  (:import [clojure.lang IPersistentVector Keyword]
+           [com.fasterxml.jackson.core JsonToken JsonParser]
+           [java.util Map HashMap]))
 
 ;;;; # FIRSTS Set
 
@@ -55,6 +56,22 @@
                   [name (with-lookaheads production nt-firsts nt-follows (get nt-follows name))]))
         grammar))
 
+;;;; # Parsers
+
+(defprotocol ToParser
+  (->parser [production grammar ^Map parsers]))
+
+(defn- grammar-parsers [grammar]
+  (let [parsers (HashMap.)]
+    (into {} (map (fn [[name production]] [name (->parser production grammar parsers)]))
+          grammar)))
+
+(defn- parse-error? [v] (identical? v ::parse-error))
+
+(defn- map-success [f v] (if-not (parse-error? v) (f v) v))
+
+(defn- success-or-else [f v] (if-not (parse-error? v) v (f)))
+
 ;;;; # Grammar AST
 
 (deftype Terminal [lookaheads token]
@@ -66,7 +83,17 @@
 
   Lookaheads
   (get-lookaheads [_] lookaheads)
-  (with-lookaheads [_ _ _ _] (Terminal. #{token} token)))
+  (with-lookaheads [_ _ _ _] (Terminal. #{token} token))
+
+  ToParser
+  (->parser [production _ _]
+    (fn [^JsonParser tokens]
+      (let [token* (.currentToken tokens)]
+        (if (identical? token* token)
+          (do
+            (.nextToken tokens)
+            token)
+          ::parse-error)))))
 
 (defn- terminal [token] (Terminal. nil token))
 
@@ -80,7 +107,19 @@
   Lookaheads
   (get-lookaheads [_] lookaheads)
   (with-lookaheads [_ nt-firsts nt-follows _]
-    (NonTerminal. (->lookaheads (get nt-firsts name) (get nt-follows name)) name)))
+    (NonTerminal. (->lookaheads (get nt-firsts name) (get nt-follows name)) name))
+
+  ToParser
+  (->parser [_ grammar parsers]
+    (let [^Map parsers parsers]
+      (if-some [pbox (.get parsers name)]
+        (or @pbox                                           ; black: direct reference acquired
+            (fn [tokens] (@pbox tokens)))                   ; grey: lazily wait until parse time
+        (let [pbox (volatile! nil)
+              _ (.put parsers name pbox)                    ; shade it grey
+              p (->parser (get grammar name) grammar parsers)]
+          (vreset! pbox p)                                  ; blacken
+          p)))))
 
 (defn- nonterminal [name] (NonTerminal. nil name))
 
@@ -104,9 +143,32 @@
                                       [(conj args (with-lookaheads arg nt-firsts nt-follows follows))
                                        (->lookaheads (firsts* nt-firsts arg) follows)])
                                     [() follows] (rseq args))]
-      (Functor. lookaheads f (vec args)))))
+      (Functor. lookaheads f (vec args))))
+
+  ToParser
+  (->parser [_ grammar parsers]
+    (let [p (reduce (fn [p arg]
+                      (let [arg-parser (->parser arg grammar parsers)]
+                        (fn [tokens args]
+                          (->> (arg-parser tokens)
+                               (map-success (fn [v] (p tokens (conj args v))))))))
+                    (fn [_ coll] (apply f coll))
+                    (rseq args))]
+      (fn [tokens] (p tokens [])))))
 
 (defn- fmap [f args] (Functor. nil f args))
+
+(defn- check-alts-conflicts [alts]
+  (loop [alts-las (mapv get-lookaheads alts)]
+    (when (seq alts-las)
+      (let [[alt-las & ralts-las] alts-las]
+        (run! (fn [alt*-las]
+                (let [conflict (set/intersection alt-las alt*-las)]
+                  (when (seq conflict)
+                    (throw (ex-info ":or lookaheads conflict"
+                                    {:lookaheads alt-las, :lookaheads* alt*-las})))))
+              ralts-las)
+        (recur ralts-las)))))
 
 (deftype Alt [lookaheads alts]
   Firsts
@@ -127,7 +189,18 @@
                                         [(conj alts alt)
                                          (set/union lookaheads (get-lookaheads alt))]))
                                     [[] #{}] alts)]
-      (Alt. lookaheads alts))))
+      (Alt. lookaheads alts)))
+
+  ToParser
+  (->parser [_ grammar parsers]
+    (check-alts-conflicts alts)
+    (reduce (fn [p alt]
+              (let [alt-parser (->parser alt grammar parsers)]
+                (fn [tokens]
+                  (->> (alt-parser tokens)
+                       (success-or-else (fn [] (p tokens)))))))
+            (->parser (peek alts) grammar parsers)
+            (rest (rseq alts)))))
 
 (defn- alt [alts] (Alt. nil alts))
 
@@ -175,10 +248,10 @@
                 (syntax-error c))))
 
   Boolean
-  (-analyze [b _] (terminal (if b JsonToken/VALUE_TRUE JsonToken/VALUE_FALSE)))
+  (-analyze [b _] (->> (if b JsonToken/VALUE_TRUE JsonToken/VALUE_FALSE) terminal vector (fmap (fn [_] b))))
 
   nil
-  (-analyze [_ _] (terminal JsonToken/VALUE_NULL)))
+  (-analyze [_ _] (->> JsonToken/VALUE_NULL terminal vector (fmap (fn [_] nil)))))
 
 (defn analyze-grammar [grammar]
   (if (map? grammar)
@@ -186,12 +259,27 @@
           grammar)
     (throw (RuntimeException. "Grammar is not a map"))))
 
+;;;; # Full Parserification
+
+(defn parsers [grammar start-nts]
+  (let [grammar (analyze-grammar grammar)
+        nt-firsts (grammar-firsts grammar)
+        nt-follows (grammar-follows nt-firsts grammar start-nts)
+        la-grammar (grammar-with-lookaheads nt-firsts nt-follows grammar)
+        parsers (grammar-parsers la-grammar)]
+    (mapv (fn [name]
+            (let [p (get parsers name)]
+              (fn [^JsonParser tokens]
+                (.nextToken tokens)
+                (p tokens))))
+          start-nts)))
+
 ;;;;
 
 (comment
   (def generic
-    {:value   [:or :object :array :boolean :null]
-     :object  [:-> \{ \} (fn [_ _] {})]
-     :array   [:-> \[ \] (fn [_ _] [])]
+    {:value [:or :object :array :boolean :null]
+     :object [:-> \{ \} (fn [_ _] {})]
+     :array [:-> \[ \] (fn [_ _] [])]
      :boolean [:or true false]
-     :null    nil}))
+     :null nil}))
