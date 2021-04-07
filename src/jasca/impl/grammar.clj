@@ -86,7 +86,7 @@
   (with-lookaheads [_ _ _ _] (Terminal. #{token} token))
 
   ToParser
-  (->parser [production _ _]
+  (->parser [_ _ _]
     (fn [^JsonParser tokens]
       (let [token* (.currentToken tokens)]
         (if (identical? token* token)
@@ -204,6 +204,31 @@
 
 (defn- alt [alts] (Alt. nil alts))
 
+(deftype Many [lookaheads elem]
+  Firsts
+  (-firsts* [_ nt-firsts] (conj (firsts* nt-firsts elem) epsilon))
+
+  Follows
+  (-follows* [_ follows nt-firsts nt-follows] (follows* nt-firsts nt-follows elem follows))
+
+  Lookaheads
+  (get-lookaheads [_] lookaheads)
+  (with-lookaheads [_ nt-firsts nt-follows follows]
+    (let [elem (with-lookaheads elem nt-firsts nt-follows follows)]
+      (Many. (->lookaheads (get-lookaheads elem) follows) elem)))
+
+  ToParser
+  (->parser [_ grammar parsers]
+    (let [elem-parser (->parser elem grammar parsers)]
+      (fn [tokens]
+        (loop [coll (transient [])]
+          (let [v (elem-parser tokens)]
+            (if (parse-error? v)
+              (persistent! coll)
+              (recur (conj! coll v)))))))))
+
+(defn- many [elem] (Many. nil elem))
+
 ;;;; # Analyze into Grammar AST
 
 (defprotocol Analyzable
@@ -229,6 +254,11 @@
           :or (if (seq args)
                 (alt (mapv #(analyze grammar %) args))
                 (throw (RuntimeException. (str "Empty " op " args"))))
+
+          :* (if (= (count args) 1)
+               (many (analyze grammar (first args)))
+               (throw (RuntimeException. (str op " expected one arg, got " (count args)))))
+
           (throw (RuntimeException. (str "Invalid grammar operator: " op)))))
       (syntax-error coll)))
 
@@ -280,6 +310,6 @@
   (def generic
     {:value [:or :object :array :boolean :null]
      :object [:-> \{ \} (fn [_ _] {})]
-     :array [:-> \[ \] (fn [_ _] [])]
+     :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
      :boolean [:or true false]
      :null nil}))
