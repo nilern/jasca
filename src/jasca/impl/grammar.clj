@@ -170,14 +170,19 @@
 
   ToParser
   (->parser [_ grammar parsers]
-    (let [p (reduce (fn [p arg]
-                      (let [arg-parser (->parser arg grammar parsers)]
-                        (fn [tokens args]
-                          (->> (arg-parser tokens)
-                               (map-success (fn [v] (p tokens (conj args v))))))))
-                    (fn [_ coll] (apply f coll))
-                    (rseq args))]
-      (fn [tokens] (p tokens [])))))
+    (let [p (transduce (map-indexed vector)
+                       (completing
+                         (fn [p [revi arg]]
+                           (let [^int i (- (count args) 1 revi)
+                                 arg-parser (->parser arg grammar parsers)]
+                             (fn [tokens ^"[Ljava.lang.Object;" args]
+                               (->> (arg-parser tokens)
+                                    (map-success (fn [v]
+                                                   (aset args i v)
+                                                   (p tokens args))))))))
+                       (fn [_ args] (apply f args))
+                       (rseq args))]
+      (fn [tokens] (p tokens (object-array (count args)))))))
 
 (defn- fmap [f args] (Functor. nil f args))
 

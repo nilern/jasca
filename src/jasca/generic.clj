@@ -2,7 +2,8 @@
   (:refer-clojure :exclude [read-string])
   (:require [jasca.core :as core :refer [plet orp]]
             [jasca.impl.grammar :as impl])
-  (:import [com.fasterxml.jackson.core JsonFactory JsonToken]))
+  (:import [com.fasterxml.jackson.core JsonFactory JsonToken]
+           [clojure.lang MapEntry]))
 
 (def skip-value
   (core/fix (fn [skip-value]
@@ -19,7 +20,7 @@
 
 (def grammar
   {:value [:or :object :array :string :int :float :boolean :null]
-   :object [:-> \{ [:* [:-> JsonToken/FIELD_NAME :value vector]] \} (fn [_ kvs _] (into {} kvs))]
+   :object [:-> \{ [:* [:-> JsonToken/FIELD_NAME :value #(MapEntry. %1 %2)]] \} (fn [_ kvs _] (into {} kvs))]
    :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
    :string String
    :int Long
