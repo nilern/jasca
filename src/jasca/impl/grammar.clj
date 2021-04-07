@@ -311,7 +311,14 @@
   (-analyze [b _] (->> (if b JsonToken/VALUE_TRUE JsonToken/VALUE_FALSE) terminal vector (fmap (fn [_] b))))
 
   nil
-  (-analyze [_ _] (->> JsonToken/VALUE_NULL terminal vector (fmap (fn [_] nil)))))
+  (-analyze [_ _] (->> JsonToken/VALUE_NULL terminal vector (fmap (fn [_] nil))))
+
+  ;; HACK
+  JsonToken
+  (-analyze [token _]
+    (if (identical? token JsonToken/FIELD_NAME)
+      (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (.getValueAsString tokens)))
+      (throw (RuntimeException. (str "Invalid grammar: " token))))))
 
 (defn analyze-grammar [grammar]
   (if (map? grammar)
@@ -339,7 +346,7 @@
 (comment
   (def generic
     {:value [:or :object :array :string :int :float :boolean :null]
-     :object [:-> \{ \} (fn [_ _] {})]
+     :object [:-> \{ [:* [:-> JsonToken/FIELD_NAME :value vector]] \} (fn [_ kvs _] (into {} kvs))]
      :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
      :string String
      :int Long
