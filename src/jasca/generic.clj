@@ -1,18 +1,8 @@
 (ns jasca.generic
   (:refer-clojure :exclude [read-string])
-  (:require [jasca.core :as core :refer [plet orp]])
+  (:require [jasca.core :as core :refer [plet orp]]
+            [jasca.impl.grammar :as impl])
   (:import [com.fasterxml.jackson.core JsonFactory JsonToken]))
-
-(def value
-  (core/fix (fn [value]
-              (orp (core/object-of identity value)
-                   (core/array-of value)
-                   core/stringp
-                   core/intp
-                   core/floatp
-                   core/truep
-                   core/falsep
-                   core/nullp))))
 
 (def skip-value
   (core/fix (fn [skip-value]
@@ -27,5 +17,17 @@
 
 (def ^JsonFactory +factory+ (JsonFactory.))
 
-(defn read-value [^String s]
-  (core/parse value (.createParser +factory+ s)))
+(def grammar
+  {:value [:or :object :array :string :int :float :boolean :null]
+   :object [:-> \{ [:* [:-> JsonToken/FIELD_NAME :value vector]] \} (fn [_ kvs _] (into {} kvs))]
+   :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
+   :string String
+   :int Long
+   :float Double
+   :boolean [:or true false]
+   :null nil})
+
+(def read-value
+  (let [parser (-> grammar (impl/parsers [:value]) first)]
+    (fn [^String s]
+      (parser (.createParser +factory+ s)))))

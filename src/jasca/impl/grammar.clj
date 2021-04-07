@@ -340,16 +340,3 @@
                 (.nextToken tokens)
                 (p tokens))))
           start-nts)))
-
-;;;;
-
-(comment
-  (def generic
-    {:value [:or :object :array :string :int :float :boolean :null]
-     :object [:-> \{ [:* [:-> JsonToken/FIELD_NAME :value vector]] \} (fn [_ kvs _] (into {} kvs))]
-     :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
-     :string String
-     :int Long
-     :float Double
-     :boolean [:or true false]
-     :null nil}))
