@@ -299,9 +299,9 @@
   Class
   (-analyze [class _]
     (condp = class
-      String (terminal-value JsonToken/VALUE_STRING (fn [^JsonParser tokens] (.getValueAsString tokens)))
-      Long (terminal-value JsonToken/VALUE_NUMBER_INT (fn [^JsonParser tokens] (.getValueAsLong tokens)))
-      Double (terminal-value JsonToken/VALUE_NUMBER_FLOAT (fn [^JsonParser tokens] (.getValueAsDouble tokens)))))
+      String (terminal-value JsonToken/VALUE_STRING (fn [^JsonParser tokens] (.getText tokens)))
+      Long (terminal-value JsonToken/VALUE_NUMBER_INT (fn [^JsonParser tokens] (.getLongValue tokens)))
+      Double (terminal-value JsonToken/VALUE_NUMBER_FLOAT (fn [^JsonParser tokens] (.getDoubleValue tokens)))))
 
   Character
   (-analyze [c _]
@@ -322,7 +322,7 @@
   JsonToken
   (-analyze [token _]
     (if (identical? token JsonToken/FIELD_NAME)
-      (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (.getValueAsString tokens)))
+      (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (.getText tokens)))
       (throw (RuntimeException. (str "Invalid grammar: " token))))))
 
 (defn analyze-grammar [grammar]
