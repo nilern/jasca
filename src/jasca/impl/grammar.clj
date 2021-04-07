@@ -170,19 +170,41 @@
 
   ToParser
   (->parser [_ grammar parsers]
-    (let [p (transduce (map-indexed vector)
-                       (completing
-                         (fn [p [revi arg]]
-                           (let [^int i (- (count args) 1 revi)
-                                 arg-parser (->parser arg grammar parsers)]
-                             (fn [tokens ^"[Ljava.lang.Object;" args]
-                               (->> (arg-parser tokens)
-                                    (map-success (fn [v]
-                                                   (aset args i v)
-                                                   (p tokens args))))))))
-                       (fn [_ args] (apply f args))
-                       (rseq args))]
-      (fn [tokens] (p tokens (object-array (count args)))))))
+    (case (count args)
+      0 (f)
+      1 (let [arg-parser (->parser (get args 0) grammar parsers)]
+          (fn [tokens]
+            (map-success f (arg-parser tokens))))
+      2 (let [arg-parser (->parser (get args 0) grammar parsers)
+              arg-parser* (->parser (get args 1) grammar parsers)]
+          (fn [tokens]
+            (->> (arg-parser tokens)
+                 (map-success (fn [v]
+                                (->> (arg-parser* tokens)
+                                     (map-success (fn [v*] (f v v*)))))))))
+      3 (let [arg-parser (->parser (get args 0) grammar parsers)
+              arg-parser* (->parser (get args 1) grammar parsers)
+              arg-parser** (->parser (get args 2) grammar parsers)]
+          (fn [tokens]
+            (->> (arg-parser tokens)
+                 (map-success (fn [v]
+                                (->> (arg-parser* tokens)
+                                     (map-success (fn [v*]
+                                                    (->> (arg-parser** tokens)
+                                                         (map-success (fn [v**] (f v v* v**))))))))))))
+      (let [p (transduce (map-indexed vector)
+                         (completing
+                           (fn [p [revi arg]]
+                             (let [^int i (- (count args) 1 revi)
+                                   arg-parser (->parser arg grammar parsers)]
+                               (fn [tokens ^"[Ljava.lang.Object;" args]
+                                 (->> (arg-parser tokens)
+                                      (map-success (fn [v]
+                                                     (aset args i v)
+                                                     (p tokens args))))))))
+                         (fn [_ args] (apply f args))
+                         (rseq args))]
+        (fn [tokens] (p tokens (object-array (count args))))))))
 
 (defn- fmap [f args] (Functor. nil f args))
 
