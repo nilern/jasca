@@ -97,6 +97,29 @@
 
 (defn- terminal [token] (Terminal. nil token))
 
+(deftype TerminalValue [lookaheads token get-value]
+  Firsts
+  (-firsts* [_ _] #{token})
+
+  Follows
+  (-follows* [_ _ _ nt-follows] nt-follows)
+
+  Lookaheads
+  (get-lookaheads [_] lookaheads)
+  (with-lookaheads [_ _ _ _] (TerminalValue. #{token} token get-value))
+
+  ToParser
+  (->parser [_ _ _]
+    (fn [^JsonParser tokens]
+      (let [token* (.currentToken tokens)]
+        (if (identical? token* token)
+          (let [v (get-value tokens)]
+            (.nextToken tokens)
+            v)
+          ::parse-error)))))
+
+(defn terminal-value [token get-value] (TerminalValue. nil token get-value))
+
 (deftype NonTerminal [lookaheads name]
   Firsts
   (-firsts* [_ nt-firsts] (get nt-firsts name))
@@ -268,6 +291,13 @@
       (nonterminal kw)
       (throw (RuntimeException. (str "Nonterminal " kw " does not exist in grammar")))))
 
+  Class
+  (-analyze [class _]
+    (condp = class
+      String (terminal-value JsonToken/VALUE_STRING (fn [^JsonParser tokens] (.getValueAsString tokens)))
+      Long (terminal-value JsonToken/VALUE_NUMBER_INT (fn [^JsonParser tokens] (.getValueAsLong tokens)))
+      Double (terminal-value JsonToken/VALUE_NUMBER_FLOAT (fn [^JsonParser tokens] (.getValueAsDouble tokens)))))
+
   Character
   (-analyze [c _]
     (terminal (case c
@@ -308,8 +338,11 @@
 
 (comment
   (def generic
-    {:value [:or :object :array :boolean :null]
+    {:value [:or :object :array :string :int :float :boolean :null]
      :object [:-> \{ \} (fn [_ _] {})]
      :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
+     :string String
+     :int Long
+     :float Double
      :boolean [:or true false]
      :null nil}))
