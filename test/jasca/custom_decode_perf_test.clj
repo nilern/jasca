@@ -4,9 +4,63 @@
             [jsonista.core :as j]
             [jasca.impl.grammar :as impl]
             [jasca.generic :as generic]
+            [malli.core :as m]
             [criterium.core :as cc])
   (:import [java.time LocalDateTime]
            [java.time.format DateTimeFormatter]))
+
+(def ^:private LocalDatetime
+  (m/-simple-schema {:type :local-date-time, :pred #(instance? LocalDateTime %)}))
+
+(def ^:private UserId
+  (m/schema
+    [:map {:closed true}
+     [:name :string]
+     [:value [:maybe :string]]]))
+
+(def ^:private Login
+  (m/schema
+    [:map {:closed true}
+     [:username :string]
+     [:md5 integer?]
+     [:sha1 integer?]
+     [:sha256 integer?]]))
+
+(def ^:private UserName
+  (m/schema
+    [:map {:closed true}
+     [:title :string]
+     [:first :string]
+     [:last :string]]))
+
+(def ^:private Location
+  (m/schema
+    [:map {:closed true}
+     [:street :string]
+     [:city :string]
+     [:state :string]
+     [:postcode :string]]))
+
+(def ^:private User
+  (m/schema
+    [:map {:closed true}
+     [:email :string]
+     [:phone :string]
+     [:name UserName]
+     [:nat :string]
+     [:login Login]
+     [:dob LocalDatetime]
+     [:id UserId]
+     [:picture [:map {:closed true}
+                [:large :string]
+                [:medium :string]
+                [:thumbnail :string]]]
+     [:gender :string]
+     [:registered LocalDatetime]
+     [:cell :string]
+     [:location Location]]))
+
+(def ^:private validate-users (m/validator [:vector User]))
 
 (defn- parse-hex-string [^String s] (bigint (BigInteger. s 16)))
 
@@ -31,21 +85,26 @@
       (update :registered parse-randomuser-instant)))
 
 (defn- decode-cheshire [s]
-  (->> (cheshire/parse-string s true)
-       :results
-       (mapv postprocess-user)))
+  (let [users (->> (cheshire/parse-string s true)
+                   :results
+                   (mapv postprocess-user))]
+    (assert (validate-users users))
+    users))
 
 (defn- decode-jsonista [s]
-  (->> (j/read-value s j/keyword-keys-object-mapper)
-       :results
-       (mapv postprocess-user)))
+  (let [users (->> (j/read-value s j/keyword-keys-object-mapper)
+                   :results
+                   (mapv postprocess-user))]
+    (assert (validate-users users))
+    users))
 
 (def ^:private decode-jasca
   (let [grammar (assoc generic/grammar
                   :hex-hash [:-> String parse-hex-string]
                   :randomuser-instant [:-> String parse-randomuser-instant]
 
-                  :user-id [:object keyword {:name String, :value String}]
+                  :user-id [:object keyword {:name String
+                                             :value [:or String nil]}]
 
                   :login [:-> [:object keyword
                                {:username String
@@ -65,7 +124,7 @@
                              {:street String
                               :city String
                               :state String
-                              :postcode [:-> Long str]}]
+                              :postcode [:or String [:-> Long str]]}]
 
                   :user [:object keyword
                          {:id :user-id
@@ -106,5 +165,5 @@
     (cc/quick-bench (decode-jasca (.createParser generic/+factory+ json)))))
 
 (defn decode-perf-different-sizes []
-  (doseq [size ["10b" "100b" "1k" "10k" "100k"]]
+  (doseq [size ["1k" "10k" "100k"]]
     (decode-perf-size size)))

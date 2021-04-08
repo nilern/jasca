@@ -14,6 +14,7 @@
                                   [cheshire "5.10.0"]
                                   [org.clojure/data.json "1.0.0"]
                                   [com.cognitect/transit-clj "1.0.324"]
+                                  [metosin/malli "0.4.0"]
                                   [criterium "0.4.6"]]
                    :global-vars {*warn-on-reflection* true}}
              :jmh {:jvm-opts ["-Dclojure.compiler.direct-linking=true"]}
