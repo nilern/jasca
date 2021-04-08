@@ -96,13 +96,13 @@
 
     (println file)
 
-    (println "decode ids: cheshire")
+    (println "custom decode: cheshire")
     (cc/quick-bench (decode-cheshire json))
 
-    (println "decode ids: jsonista")
+    (println "custom decode: jsonista")
     (cc/quick-bench (decode-jsonista json))
 
-    (println "decode ids: jasca")
+    (println "custom decode: jasca")
     (cc/quick-bench (decode-jasca (.createParser generic/+factory+ json)))))
 
 (defn decode-perf-different-sizes []

@@ -341,7 +341,7 @@
   (-firsts* [_ _] obj-firsts)
 
   Follows
-  (-follows* [_ _ nt-firsts nt-follows]
+  (-follows* [_ _ nt-firsts _]
     (reduce-kv (fn [nt-follows _ value]
                  (follows* nt-firsts nt-follows value (conj (firsts* nt-firsts value) JsonToken/END_OBJECT)))
                nil fields))
@@ -358,14 +358,15 @@
   (->parser [_ grammar parsers]
     (let [key-parser (->parser (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (kf (.getText tokens))))
                                grammar parsers)
-          parsers (into {} (map (fn [[k v]] [k (->parser v grammar parsers)]))
-                        fields)]
+          parsers (HashMap.)]
+      (reduce-kv (fn [_ k v] (.put parsers k (->parser v grammar parsers)))
+                 nil fields)
       (fn [tokens]
         (elet [_ (obj-start-parser tokens)]
           (loop [m (transient {})]
             (if (parse-error? (obj-end-parser tokens))
               (elet [k (key-parser tokens)]
-                (if-some [val-parser (get parsers k)]
+                (if-some [val-parser (.get parsers k)]
                   (elet [v (val-parser tokens)]
                     (recur (assoc! m k v)))
                   ::parse-error))
