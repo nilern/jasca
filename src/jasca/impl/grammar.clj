@@ -68,9 +68,15 @@
 
 (defn- parse-error? [v] (identical? v ::parse-error))
 
-(defn- map-success [f v] (if-not (parse-error? v) (f v) v))
-
-(defn- success-or-else [f v] (if-not (parse-error? v) v (f)))
+(defmacro ^:private elet [bindings & body]
+  (if (empty? bindings)
+    `(do ~@body)
+    (let [[b v & bindings] bindings]
+      `(let [~b ~v]
+         (if (parse-error? ~b)
+           ~b
+           (elet ~(vec bindings)
+             ~@body))))))
 
 ;;;; # Grammar AST
 
@@ -174,34 +180,41 @@
       0 (f)
       1 (let [arg-parser (->parser (get args 0) grammar parsers)]
           (fn [tokens]
-            (map-success f (arg-parser tokens))))
+            (elet [v (arg-parser tokens)]
+              (f v))))
       2 (let [arg-parser (->parser (get args 0) grammar parsers)
               arg-parser* (->parser (get args 1) grammar parsers)]
           (fn [tokens]
-            (->> (arg-parser tokens)
-                 (map-success (fn [v]
-                                (->> (arg-parser* tokens)
-                                     (map-success (fn [v*] (f v v*)))))))))
+            (elet [v (arg-parser tokens)
+                   v* (arg-parser* tokens)]
+              (f v v*))))
       3 (let [arg-parser (->parser (get args 0) grammar parsers)
               arg-parser* (->parser (get args 1) grammar parsers)
               arg-parser** (->parser (get args 2) grammar parsers)]
           (fn [tokens]
-            (->> (arg-parser tokens)
-                 (map-success (fn [v]
-                                (->> (arg-parser* tokens)
-                                     (map-success (fn [v*]
-                                                    (->> (arg-parser** tokens)
-                                                         (map-success (fn [v**] (f v v* v**))))))))))))
+            (elet [v (arg-parser tokens)
+                   v* (arg-parser* tokens)
+                   v** (arg-parser** tokens)]
+              (f v v* v**))))
+      4 (let [arg-parser (->parser (get args 0) grammar parsers)
+              arg-parser* (->parser (get args 1) grammar parsers)
+              arg-parser** (->parser (get args 2) grammar parsers)
+              arg-parser*** (->parser (get args 3) grammar parsers)]
+          (fn [tokens]
+            (elet [v (arg-parser tokens)
+                   v* (arg-parser* tokens)
+                   v** (arg-parser** tokens)
+                   v*** (arg-parser*** tokens)]
+              (f v v* v** v***))))
       (let [p (transduce (map-indexed vector)
                          (completing
                            (fn [p [revi arg]]
                              (let [^int i (- (count args) 1 revi)
                                    arg-parser (->parser arg grammar parsers)]
                                (fn [tokens ^"[Ljava.lang.Object;" args]
-                                 (->> (arg-parser tokens)
-                                      (map-success (fn [v]
-                                                     (aset args i v)
-                                                     (p tokens args))))))))
+                                 (elet [v (arg-parser tokens)]
+                                   (aset args i v)
+                                   (p tokens args))))))
                          (fn [_ args] (apply f args))
                          (rseq args))]
         (fn [tokens] (p tokens (object-array (count args))))))))
@@ -247,8 +260,10 @@
     (reduce (fn [p alt]
               (let [alt-parser (->parser alt grammar parsers)]
                 (fn [tokens]
-                  (->> (alt-parser tokens)
-                       (success-or-else (fn [] (p tokens)))))))
+                  (let [v (alt-parser tokens)]
+                    (if-not (parse-error? v)
+                      v
+                      (p tokens))))))
             (->parser (peek alts) grammar parsers)
             (rest (rseq alts)))))
 
@@ -302,18 +317,13 @@
                                grammar parsers)
           value-parser (->parser value grammar parsers)]
       (fn [tokens]
-        (->> (obj-start-parser tokens)
-             (map-success (fn [_]
-                            (loop [m (transient {})]
-                              (if (parse-error? (obj-end-parser tokens))
-                                (let [k (key-parser tokens)]
-                                  (if-not (parse-error? k)
-                                    (let [v (value-parser tokens)]
-                                      (if-not (parse-error? v)
-                                        (recur (assoc! m k v))
-                                        v))
-                                    k))
-                                (persistent! m))))))))))
+        (elet [_ (obj-start-parser tokens)]
+          (loop [m (transient {})]
+            (if (parse-error? (obj-end-parser tokens))
+              (elet [k (key-parser tokens)
+                     v (value-parser tokens)]
+                (recur (assoc! m k v)))
+              (persistent! m))))))))
 
 (def ^:private object-of ->JsonObject)
 
