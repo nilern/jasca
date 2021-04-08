@@ -284,8 +284,9 @@
 
   Lookaheads
   (get-lookaheads [_] array-firsts)
-  (with-lookaheads [_ nt-firsts nt-follows follows]
-    (JsonArray. (with-lookaheads elem nt-firsts nt-follows follows)))
+  (with-lookaheads [_ nt-firsts nt-follows _]
+    (JsonArray. (with-lookaheads elem nt-firsts nt-follows
+                                 (conj (firsts* nt-firsts elem) JsonToken/END_ARRAY))))
 
   ToParser
   (->parser [_ grammar parsers]
@@ -305,7 +306,7 @@
 (def ^:private obj-start-parser (->parser (terminal JsonToken/START_OBJECT) nil nil))
 (def ^:private obj-end-parser (->parser (terminal JsonToken/END_OBJECT) nil nil))
 
-(deftype JsonObject [kf value]
+(deftype JsonObjectOf [kf value]
   Firsts
   (-firsts* [_ _] obj-firsts)
 
@@ -316,7 +317,8 @@
   Lookaheads
   (get-lookaheads [_] obj-firsts)
   (with-lookaheads [_ nt-firsts nt-follows _]
-    (JsonObject. kf (with-lookaheads value nt-firsts nt-follows obj-firsts)))
+    (JsonObjectOf. kf (with-lookaheads value nt-firsts nt-follows
+                                       (conj (firsts* nt-firsts value) JsonToken/END_OBJECT))))
 
   ToParser
   (->parser [_ grammar parsers]
@@ -332,7 +334,46 @@
                 (recur (assoc! m k v)))
               (persistent! m))))))))
 
-(def ^:private object-of ->JsonObject)
+(def ^:private object-of ->JsonObjectOf)
+
+(deftype JsonObject [kf fields]
+  Firsts
+  (-firsts* [_ _] obj-firsts)
+
+  Follows
+  (-follows* [_ _ nt-firsts nt-follows]
+    (reduce-kv (fn [nt-follows _ value]
+                 (follows* nt-firsts nt-follows value (conj (firsts* nt-firsts value) JsonToken/END_OBJECT)))
+               nil fields))
+
+  Lookaheads
+  (get-lookaheads [_] obj-firsts)
+  (with-lookaheads [_ nt-firsts nt-follows _]
+    (JsonObject. kf (into {} (map (fn [[k v]]
+                                    [k (with-lookaheads v nt-firsts nt-follows
+                                                        (conj (firsts* nt-firsts v) JsonToken/END_OBJECT))]))
+                          fields)))
+
+  ToParser
+  (->parser [_ grammar parsers]
+    (let [key-parser (->parser (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (kf (.getText tokens))))
+                               grammar parsers)
+          parsers (into {} (map (fn [[k v]] [k (->parser v grammar parsers)]))
+                        fields)]
+      (fn [tokens]
+        (elet [_ (obj-start-parser tokens)]
+          (loop [m (transient {})]
+            (if (parse-error? (obj-end-parser tokens))
+              (elet [k (key-parser tokens)]
+                (if-some [val-parser (get parsers k)]
+                  (elet [v (val-parser tokens)]
+                    (recur (assoc! m k v)))
+                  ::parse-error))
+              (persistent! m))))))))
+
+(defn ^:private obj
+  ([fields] (obj identity fields))
+  ([kf fields] (JsonObject. kf fields)))
 
 ;;;; # Analyze into Grammar AST
 
@@ -370,6 +411,19 @@
                            (object-of kf (analyze grammar value))
                            (throw (RuntimeException. (str op " key-fn is not an IFn")))))
                        (throw (RuntimeException. (str op " expected two args, got " (count args)))))
+
+          :object (case (count args)
+                    1 (let [[fields] args]
+                        (if (map? fields)
+                          (obj (into {} (map (fn [[k v]] [k (analyze grammar v)])) fields))
+                          (throw (RuntimeException. (str op "fields is not a map")))))
+                    2 (let [[kf fields] args]
+                        (if (map? fields)
+                          (if (ifn? kf)
+                            (obj kf (into {} (map (fn [[k v]] [k (analyze grammar v)])) fields))
+                            (throw (RuntimeException. (str op " key-fn is not an IFn"))))
+                          (throw (RuntimeException. (str op "fields is not a map")))))
+                    (throw (RuntimeException. (str op " expected one or two args, got " (count args)))))
 
           (throw (RuntimeException. (str "Invalid grammar operator: " op)))))
       (syntax-error coll)))
