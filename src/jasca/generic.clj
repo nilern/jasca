@@ -24,7 +24,7 @@
    :string String
    :int Long
    :float Double
-   :boolean [:or true false]
+   :boolean Boolean
    :null nil})
 
 (def read-value

@@ -381,11 +381,12 @@
       (throw (RuntimeException. (str "Nonterminal " kw " does not exist in grammar")))))
 
   Class
-  (-analyze [class _]
+  (-analyze [class grammar]
     (condp = class
       String (terminal-value JsonToken/VALUE_STRING (fn [^JsonParser tokens] (.getText tokens)))
       Long (terminal-value JsonToken/VALUE_NUMBER_INT (fn [^JsonParser tokens] (.getLongValue tokens)))
-      Double (terminal-value JsonToken/VALUE_NUMBER_FLOAT (fn [^JsonParser tokens] (.getDoubleValue tokens)))))
+      Double (terminal-value JsonToken/VALUE_NUMBER_FLOAT (fn [^JsonParser tokens] (.getDoubleValue tokens)))
+      Boolean (analyze grammar [:or true false])))
 
   Boolean
   (-analyze [b _] (->> (if b JsonToken/VALUE_TRUE JsonToken/VALUE_FALSE) terminal vector (fmap (fn [_] b))))
