@@ -269,30 +269,36 @@
 
 (defn- alt [alts] (Alt. nil alts))
 
-(deftype Many [lookaheads elem]
+(def ^:private array-firsts #{JsonToken/START_ARRAY})
+
+(def ^:private array-start-parser (->parser (terminal JsonToken/START_ARRAY) nil nil))
+(def ^:private array-end-parser (->parser (terminal JsonToken/END_ARRAY) nil nil))
+
+(deftype JsonArray [elem]
   Firsts
-  (-firsts* [_ nt-firsts] (conj (firsts* nt-firsts elem) epsilon))
+  (-firsts* [_ _] array-firsts)
 
   Follows
-  (-follows* [_ follows nt-firsts nt-follows] (follows* nt-firsts nt-follows elem follows))
+  (-follows* [_ _ nt-firsts nt-follows]
+    (follows* nt-firsts nt-follows elem (conj (firsts* nt-firsts elem) JsonToken/END_ARRAY)))
 
   Lookaheads
-  (get-lookaheads [_] lookaheads)
+  (get-lookaheads [_] array-firsts)
   (with-lookaheads [_ nt-firsts nt-follows follows]
-    (let [elem (with-lookaheads elem nt-firsts nt-follows follows)]
-      (Many. (->lookaheads (get-lookaheads elem) follows) elem)))
+    (JsonArray. (with-lookaheads elem nt-firsts nt-follows follows)))
 
   ToParser
   (->parser [_ grammar parsers]
     (let [elem-parser (->parser elem grammar parsers)]
       (fn [tokens]
-        (loop [coll (transient [])]
-          (let [v (elem-parser tokens)]
-            (if (parse-error? v)
-              (persistent! coll)
-              (recur (conj! coll v)))))))))
+        (elet [_ (array-start-parser tokens)]
+          (loop [coll (transient [])]
+            (if (parse-error? (array-end-parser tokens))
+              (elet [v (elem-parser tokens)]
+                (recur (conj! coll v)))
+              (persistent! coll))))))))
 
-(defn- many [elem] (Many. nil elem))
+(def ^:private array-of ->JsonArray)
 
 (def ^:private obj-firsts #{JsonToken/START_OBJECT})
 
@@ -304,7 +310,8 @@
   (-firsts* [_ _] obj-firsts)
 
   Follows
-  (-follows* [_ _ nt-firsts nt-follows] (follows* nt-firsts nt-follows value obj-firsts))
+  (-follows* [_ _ nt-firsts nt-follows]
+    (follows* nt-firsts nt-follows value (conj (firsts* nt-firsts value) JsonToken/END_OBJECT)))
 
   Lookaheads
   (get-lookaheads [_] obj-firsts)
@@ -353,9 +360,9 @@
                 (alt (mapv #(analyze grammar %) args))
                 (throw (RuntimeException. (str "Empty " op " args"))))
 
-          :* (if (= (count args) 1)
-               (many (analyze grammar (first args)))
-               (throw (RuntimeException. (str op " expected one arg, got " (count args)))))
+          :array-of (if (= (count args) 1)
+                      (array-of (analyze grammar (first args)))
+                      (throw (RuntimeException. (str op " expected one arg, got " (count args)))))
 
           :object-of (if (= (count args) 2)
                        (let [[kf value] args]
@@ -379,15 +386,6 @@
       String (terminal-value JsonToken/VALUE_STRING (fn [^JsonParser tokens] (.getText tokens)))
       Long (terminal-value JsonToken/VALUE_NUMBER_INT (fn [^JsonParser tokens] (.getLongValue tokens)))
       Double (terminal-value JsonToken/VALUE_NUMBER_FLOAT (fn [^JsonParser tokens] (.getDoubleValue tokens)))))
-
-  Character
-  (-analyze [c _]
-    (terminal (case c
-                \{ JsonToken/START_OBJECT
-                \} JsonToken/END_OBJECT
-                \[ JsonToken/START_ARRAY
-                \] JsonToken/END_ARRAY
-                (syntax-error c))))
 
   Boolean
   (-analyze [b _] (->> (if b JsonToken/VALUE_TRUE JsonToken/VALUE_FALSE) terminal vector (fmap (fn [_] b))))

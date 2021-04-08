@@ -20,7 +20,7 @@
 (def grammar
   {:value [:or :object :array :string :int :float :boolean :null]
    :object [:object-of identity :value]
-   :array [:-> \[ [:* :value] \] (fn [_ vs _] vs)]
+   :array [:array-of :value]
    :string String
    :int Long
    :float Double
