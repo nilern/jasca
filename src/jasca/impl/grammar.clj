@@ -83,7 +83,7 @@
 
   Lookaheads
   (get-lookaheads [_] lookaheads)
-  (with-lookaheads [_ _ _ _] (Terminal. #{token} token))
+  (with-lookaheads [self _ _ _] self)
 
   ToParser
   (->parser [_ _ _]
@@ -95,7 +95,7 @@
             token)
           ::parse-error)))))
 
-(defn- terminal [token] (Terminal. nil token))
+(defn- terminal [token] (Terminal. #{token} token))
 
 (deftype TerminalValue [lookaheads token get-value]
   Firsts
@@ -106,7 +106,7 @@
 
   Lookaheads
   (get-lookaheads [_] lookaheads)
-  (with-lookaheads [_ _ _ _] (TerminalValue. #{token} token get-value))
+  (with-lookaheads [self _ _ _] self)
 
   ToParser
   (->parser [_ _ _]
@@ -118,7 +118,7 @@
             v)
           ::parse-error)))))
 
-(defn terminal-value [token get-value] (TerminalValue. nil token get-value))
+(defn terminal-value [token get-value] (TerminalValue. #{token} token get-value))
 
 (deftype NonTerminal [lookaheads name]
   Firsts
@@ -279,6 +279,44 @@
 
 (defn- many [elem] (Many. nil elem))
 
+(def ^:private obj-firsts #{JsonToken/START_OBJECT})
+
+(def ^:private obj-start-parser (->parser (terminal JsonToken/START_OBJECT) nil nil))
+(def ^:private obj-end-parser (->parser (terminal JsonToken/END_OBJECT) nil nil))
+
+(deftype JsonObject [kf value]
+  Firsts
+  (-firsts* [_ _] obj-firsts)
+
+  Follows
+  (-follows* [_ _ nt-firsts nt-follows] (follows* nt-firsts nt-follows value obj-firsts))
+
+  Lookaheads
+  (get-lookaheads [_] obj-firsts)
+  (with-lookaheads [_ nt-firsts nt-follows _]
+    (JsonObject. kf (with-lookaheads value nt-firsts nt-follows obj-firsts)))
+
+  ToParser
+  (->parser [_ grammar parsers]
+    (let [key-parser (->parser (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (kf (.getText tokens))))
+                               grammar parsers)
+          value-parser (->parser value grammar parsers)]
+      (fn [tokens]
+        (->> (obj-start-parser tokens)
+             (map-success (fn [_]
+                            (loop [m (transient {})]
+                              (if (parse-error? (obj-end-parser tokens))
+                                (let [k (key-parser tokens)]
+                                  (if-not (parse-error? k)
+                                    (let [v (value-parser tokens)]
+                                      (if-not (parse-error? v)
+                                        (recur (assoc! m k v))
+                                        v))
+                                    k))
+                                (persistent! m))))))))))
+
+(def ^:private object-of ->JsonObject)
+
 ;;;; # Analyze into Grammar AST
 
 (defprotocol Analyzable
@@ -309,6 +347,13 @@
                (many (analyze grammar (first args)))
                (throw (RuntimeException. (str op " expected one arg, got " (count args)))))
 
+          :object-of (if (= (count args) 2)
+                       (let [[kf value] args]
+                         (if (ifn? kf)
+                           (object-of kf (analyze grammar value))
+                           (throw (RuntimeException. (str op " key-fn is not an IFn")))))
+                       (throw (RuntimeException. (str op " expected two args, got " (count args)))))
+
           (throw (RuntimeException. (str "Invalid grammar operator: " op)))))
       (syntax-error coll)))
 
@@ -338,14 +383,7 @@
   (-analyze [b _] (->> (if b JsonToken/VALUE_TRUE JsonToken/VALUE_FALSE) terminal vector (fmap (fn [_] b))))
 
   nil
-  (-analyze [_ _] (->> JsonToken/VALUE_NULL terminal vector (fmap (fn [_] nil))))
-
-  ;; HACK
-  JsonToken
-  (-analyze [token _]
-    (if (identical? token JsonToken/FIELD_NAME)
-      (terminal-value JsonToken/FIELD_NAME (fn [^JsonParser tokens] (.getText tokens)))
-      (throw (RuntimeException. (str "Invalid grammar: " token))))))
+  (-analyze [_ _] (->> JsonToken/VALUE_NULL terminal vector (fmap (fn [_] nil)))))
 
 (defn analyze-grammar [grammar]
   (if (map? grammar)
